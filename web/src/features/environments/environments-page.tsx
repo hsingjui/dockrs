@@ -1,10 +1,7 @@
 import {
 	CircleAlert,
-	Container,
-	Cpu,
 	HardDrive,
 	MoreHorizontal,
-	PlayCircle,
 	Plus,
 	Server,
 } from "lucide-react";
@@ -17,32 +14,20 @@ import { type EnvironmentSummary, useEnvironments } from "./use-environments";
 type Filter = "all" | "online" | "local" | "agent";
 
 function KpiCard(props: {
-	icon: React.ReactNode;
-	iconClassName: string;
 	label: string;
 	value: React.ReactNode;
-	hint: React.ReactNode;
+	hint?: React.ReactNode;
 }) {
 	return (
 		<Card size="sm">
-			<CardContent className="flex items-center justify-between gap-3">
-				<div className="min-w-0">
-					<div className="font-medium text-muted-foreground text-xs">
-						{props.label}
-					</div>
-					<div className="mt-1 font-semibold text-2xl tabular-nums tracking-tight">
-						{props.value}
-					</div>
-					<div className="mt-1.5 text-xs">{props.hint}</div>
+			<CardContent>
+				<div className="text-muted-foreground text-xs">{props.label}</div>
+				<div className="mt-1 font-semibold text-2xl tabular-nums">
+					{props.value}
 				</div>
-				<span
-					className={cn(
-						"flex size-10 shrink-0 items-center justify-center rounded-xl [&_svg]:size-5",
-						props.iconClassName,
-					)}
-				>
-					{props.icon}
-				</span>
+				{props.hint && (
+					<div className="mt-1 text-muted-foreground text-xs">{props.hint}</div>
+				)}
 			</CardContent>
 		</Card>
 	);
@@ -101,28 +86,22 @@ function EnvironmentCard({ env }: { env: EnvironmentSummary }) {
 		: null;
 
 	return (
-		<div className="group flex flex-col justify-between overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 transition-shadow hover:shadow-md">
+		<div className="flex flex-col justify-between overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10 transition-shadow hover:shadow-md">
 			<div className="p-5">
 				{/* 头部 */}
 				<div className="flex items-start justify-between gap-3">
-					<div className="flex min-w-0 items-center gap-3">
-						<span className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+					<div className="min-w-0">
+						<div className="flex items-center gap-2">
 							{env.kind === "local" ? (
-								<HardDrive className="size-5" />
+								<HardDrive className="size-4 shrink-0 text-muted-foreground" />
 							) : (
-								<Server className="size-5" />
+								<Server className="size-4 shrink-0 text-muted-foreground" />
 							)}
-						</span>
-						<div className="min-w-0">
-							<div className="flex items-center gap-2">
-								<h3 className="truncate font-semibold text-sm transition-colors group-hover:text-primary">
-									{env.name}
-								</h3>
-								<StatusPill status={env.status} />
-							</div>
-							<div className="mt-0.5 truncate font-mono text-muted-foreground text-xs">
-								{env.endpoint}
-							</div>
+							<h3 className="truncate font-semibold text-sm">{env.name}</h3>
+							<StatusPill status={env.status} />
+						</div>
+						<div className="mt-0.5 truncate pl-6 font-mono text-muted-foreground text-xs">
+							{env.endpoint}
 						</div>
 					</div>
 					<Button
@@ -148,26 +127,22 @@ function EnvironmentCard({ env }: { env: EnvironmentSummary }) {
 
 				{online ? (
 					<>
-						{/* 容器计数胶囊 */}
-						<div className="mt-4 grid grid-cols-3 gap-2 rounded-lg bg-muted/60 p-2.5">
-							<div className="text-center">
-								<div className="text-[11px] text-muted-foreground">总容器</div>
-								<div className="mt-0.5 font-semibold font-mono text-base tabular-nums">
-									{total}
-								</div>
-							</div>
-							<div className="border-border/60 border-x text-center">
-								<div className="text-[11px] text-emerald-600">运行中</div>
-								<div className="mt-0.5 font-semibold font-mono text-base text-emerald-600 tabular-nums">
-									{env.containers.running}
-								</div>
-							</div>
-							<div className="text-center">
-								<div className="text-[11px] text-muted-foreground">已停止</div>
-								<div className="mt-0.5 font-semibold font-mono text-base text-muted-foreground tabular-nums">
-									{env.containers.stopped}
-								</div>
-							</div>
+						{/* 容器计数 */}
+						<div className="mt-4 text-muted-foreground text-xs">
+							容器{" "}
+							<span className="font-medium font-mono text-foreground tabular-nums">
+								{total}
+							</span>
+							<span className="mx-1.5 text-border">|</span>
+							运行中{" "}
+							<span className="font-medium font-mono text-emerald-600 tabular-nums">
+								{env.containers.running}
+							</span>
+							<span className="mx-1.5 text-border">|</span>
+							已停止{" "}
+							<span className="font-medium font-mono tabular-nums">
+								{env.containers.stopped}
+							</span>
 						</div>
 
 						{/* 资源监控条 */}
@@ -278,78 +253,39 @@ export function EnvironmentsPage() {
 				</div>
 				<Button>
 					<Plus />
-					接入新环境
+					添加环境
 				</Button>
 			</header>
 
 			{/* KPI 看板 */}
 			<div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
 				<KpiCard
-					icon={<Server />}
-					iconClassName="bg-primary/10 text-primary"
-					label="纳管环境节点"
-					value={
-						<>
-							{environments.length}{" "}
-							<span className="font-normal text-muted-foreground text-xs">
-								个节点
-							</span>
-						</>
-					}
+					label="环境"
+					value={environments.length}
 					hint={
 						<span className="flex items-center gap-2">
-							<span className="font-medium text-emerald-600">
-								{onlineCount} 在线
-							</span>
+							<span className="text-emerald-600">{onlineCount} 在线</span>
 							<span className="text-border">•</span>
-							<span className="font-medium text-rose-500">
+							<span className="text-rose-500">
 								{environments.length - onlineCount} 离线
 							</span>
 						</span>
 					}
 				/>
 				<KpiCard
-					icon={<PlayCircle />}
-					iconClassName="bg-emerald-500/10 text-emerald-600"
-					label="全部容器实例"
-					value={
-						<>
-							{totalCount}{" "}
-							<span className="font-normal text-muted-foreground text-xs">
-								/ {runningCount} 运行中
-							</span>
-						</>
-					}
-					hint={
-						<span className="font-medium text-emerald-600">
-							运行率 {runningRate}%
-						</span>
-					}
+					label="容器"
+					value={totalCount}
+					hint={`运行率 ${runningRate}%`}
 				/>
 				<KpiCard
-					icon={<Container />}
-					iconClassName="bg-indigo-500/10 text-indigo-600"
-					label="已停止容器"
-					value={totalCount - runningCount}
-					hint={<span className="text-muted-foreground">所有环境合计</span>}
+					label="运行中"
+					value={runningCount}
+					hint={`已停止 ${totalCount - runningCount}`}
 				/>
 				<KpiCard
-					icon={<Cpu />}
-					iconClassName="bg-amber-500/10 text-amber-600"
-					label="平均内存负载"
-					value={
-						<>
-							{avgMem}{" "}
-							<span className="font-normal text-muted-foreground text-xs">
-								%
-							</span>
-						</>
-					}
-					hint={
-						<span className="text-muted-foreground">
-							基于 {memEnvs.length} 个在线节点
-						</span>
-					}
+					label="平均内存"
+					value={`${avgMem}%`}
+					hint={`基于 ${memEnvs.length} 个在线环境`}
 				/>
 			</div>
 
@@ -383,24 +319,13 @@ export function EnvironmentsPage() {
 				{/* 接入引导卡 */}
 				<button
 					type="button"
-					className="flex min-h-64 cursor-pointer flex-col items-center justify-center gap-3 rounded-xl border border-border border-dashed px-6 py-10 text-center transition-colors hover:border-primary/40 hover:bg-primary/[0.02]"
+					className="flex min-h-48 cursor-pointer flex-col items-center justify-center gap-2 rounded-xl border border-border border-dashed px-6 py-10 text-center transition-colors hover:border-primary/50 hover:bg-primary/[0.02]"
 				>
-					<span className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground">
-						<Plus className="size-5" />
+					<Plus className="size-5 text-muted-foreground" />
+					<span className="font-medium text-sm">添加环境</span>
+					<span className="text-muted-foreground text-xs">
+						支持本地 Socket、TCP 或远程 Agent
 					</span>
-					<span>
-						<span className="block font-medium text-sm">
-							接入更多 Docker 环境
-						</span>
-						<span className="mt-1 block text-muted-foreground text-xs leading-relaxed">
-							支持本地 Unix Socket、TCP 远程连接或轻量级 Rust Agent
-							<br />
-							一键配对
-						</span>
-					</span>
-					<Button variant="outline" size="sm" className="pointer-events-none">
-						快速配置向导
-					</Button>
 				</button>
 			</div>
 		</div>
