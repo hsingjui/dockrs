@@ -1,0 +1,33 @@
+# Rust 构建产物
+/target/
+
+# Node
+node_modules/
+web/dist/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# SQLite 运行时数据
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# 本地配置 / 机密
+.env
+.env.*
+!.env.example
+
+# pi 本地工具接入层（trellis 可重新生成）
+.pi/
+
+# agent 本地 skill 工具层（如 ui-ux-pro-max）
+.agents/
+
+# 系统
+.DS_Store
+
+# 日志
+*.log

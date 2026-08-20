@@ -1,0 +1,50 @@
+#!/usr/bin/env sh
+# commit-msg hook —— 校验提交信息遵循 Conventional Commits（type: 中文描述）
+# 安装：git config core.hooksPath .githooks（或运行 .githooks/install.sh）
+
+commit_msg_file="$1"
+subject=$(sed -n '1p' "$commit_msg_file")
+
+# 允许的 type（对应 AGENTS.md 提交约定）
+types="feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert"
+
+if [ -z "$subject" ]; then
+	echo "提交信息不能为空" >&2
+	exit 1
+fi
+
+# 格式：type(scope)?(!)?: description
+regex="^($types)(\([^)]+\))?(!)?: .+"
+if ! printf '%s' "$subject" | grep -Eq "$regex"; then
+	cat >&2 <<EOF
+提交信息格式不正确，应为：<type>(<scope>)?: <描述>
+
+  type: $types
+  示例:
+    feat: 添加容器日志 WebSocket
+    fix(agent): 修复心跳超时重连
+    chore: 更新依赖版本
+
+实际标题: $subject
+EOF
+	exit 1
+fi
+
+# 中文软提示（不拦截）
+has_chinese=false
+python3 - "$commit_msg_file" <<'PY' && has_chinese=true
+import sys
+first = open(sys.argv[1], encoding="utf-8").readline()
+sys.exit(0 if any("\u4e00" <= ch <= "\u9fff" for ch in first) else 1)
+PY
+if [ "$has_chinese" = false ]; then
+	echo "提示：建议提交描述使用中文" >&2
+fi
+
+# 标题过长软提示
+len=$(printf '%s' "$subject" | wc -m | tr -d ' ')
+if [ "$len" -gt 72 ]; then
+	echo "提示：标题 ${len} 字符，建议不超过 72" >&2
+fi
+
+exit 0
