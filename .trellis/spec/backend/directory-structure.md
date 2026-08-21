@@ -6,22 +6,22 @@
 
 后端是 Rust workspace，按 **crate 边界** 划分职责。约定来源为根目录 `AGENTS.md`，本文件是其后端部分的可执行摘要。
 
-当前仓库状态：`Cargo.toml` 的 `workspace.members` 目前只注册了 `crates/server`（尚未添加 docker / agent crate）。
+当前仓库状态：`Cargo.toml` 的 `workspace.members` 已注册 `crates/server` 和 `crates/docker`（`crates/agent` 尚未创建）。
 
 ## 目录布局
 
 ```text
 crates/
 ├── server/   # HTTP API、WebSocket、认证、SQLite、静态前端
-├── agent/    # 远程节点 Agent，主动连接 Server（未创建）
-└── docker/   # Docker 操作封装，Server 和 Agent 共用（未创建）
+├── agent/    # 远程节点 Agent，主动连接 Server（尚未创建）
+└── docker/   # Docker 操作封装，Server 和 Agent 共用
 ```
 
 ## Crate 职责（commons 边界）
 
 - **`crates/docker`**：只负责 Docker Engine 能力（containers/images/networks/volumes/logs/stats/exec），优先通过 Bollard 实现。**禁止包含** HTTP handler、数据库、登录认证、前端逻辑。
 - **`crates/server`**：Axum API、WebSocket、登录与 Session、SQLite、Environment/Agent 管理、Compose 项目、OpenAPI、前端静态资源。Docker 资源**不要**镜像保存到 SQLite。
-- **`crates/agent`**：主动连接 Server、心跳与身份认证、接收 Docker 操作请求、调用 `crates/docker`、转发 logs/stats/exec 流式数据。尽量无状态。
+- **`crates/agent`**：主动连接 Server、心跳与身份认证、接收 Docker 操作请求、调用 `crates/docker`、转发 logs/stats/exec 流式数据。尽量无状态。**当前尚未创建，环境 API 保留受 token 保护的注册/心跳/快照接入口。**
 
 ## 模块组织
 

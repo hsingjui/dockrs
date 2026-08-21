@@ -6,11 +6,12 @@ edition = "2024"
 [dependencies]
 argon2 = "0.5"
 axum = "0.8"
+dockrs-docker = { path = "../docker" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 time = "0.3"
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "sync", "time"] }
 tower-sessions = "0.14"
 tower-sessions-sqlx-store = { version = "0.15", features = ["sqlite"] }
 tracing = "0.1"

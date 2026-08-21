@@ -14,11 +14,14 @@ use sqlx::SqlitePool;
 use tower_sessions::Session;
 use utoipa::ToSchema;
 
-use crate::error::{ApiError, ApiJson, ApiResponse};
+use crate::{
+    AppState,
+    error::{ApiError, ApiJson, ApiResponse},
+};
 
 const USER_ID_KEY: &str = "user_id";
 
-pub fn router() -> Router<SqlitePool> {
+pub fn router() -> Router<AppState> {
     Router::new()
         .route("/auth/login", post(login))
         .route("/auth/logout", post(logout))
@@ -77,10 +80,11 @@ fn verify_password(hash: &str, password: &str) -> bool {
 	)
 )]
 async fn login(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     session: Session,
     ApiJson(req): ApiJson<LoginRequest>,
 ) -> Result<ApiResponse<UserResponse>, ApiError> {
+    let pool = state.pool.clone();
     let user = sqlx::query_as::<_, UserRow>(
         "SELECT id, username, password_hash FROM users WHERE username = ?",
     )
@@ -130,18 +134,12 @@ async fn login(
     )
 )]
 async fn change_password(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     session: Session,
     ApiJson(req): ApiJson<ChangePasswordRequest>,
 ) -> Result<ApiResponse<serde_json::Value>, ApiError> {
-    let user_id = session
-        .get::<i64>(USER_ID_KEY)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "读取 session 失败");
-            ApiError::internal("修改密码失败，请稍后重试")
-        })?
-        .ok_or_else(|| ApiError::unauthorized("未登录"))?;
+    let pool = state.pool.clone();
+    let user_id = require_user(&session).await?;
 
     if req.new_password.is_empty() {
         return Err(ApiError::bad_request("新密码不能为空"));
@@ -203,17 +201,11 @@ async fn logout(session: Session) -> Result<ApiResponse<serde_json::Value>, ApiE
 	)
 )]
 async fn me(
-    State(pool): State<SqlitePool>,
+    State(state): State<AppState>,
     session: Session,
 ) -> Result<ApiResponse<UserResponse>, ApiError> {
-    let user_id = session
-        .get::<i64>(USER_ID_KEY)
-        .await
-        .map_err(|e| {
-            tracing::error!(error = %e, "读取 session 失败");
-            ApiError::internal("获取用户信息失败")
-        })?
-        .ok_or_else(|| ApiError::unauthorized("未登录"))?;
+    let pool = state.pool.clone();
+    let user_id = require_user(&session).await?;
 
     let user =
         sqlx::query_as::<_, UserRow>("SELECT id, username, password_hash FROM users WHERE id = ?")
@@ -232,6 +224,17 @@ async fn me(
         })
     })
     .ok_or_else(|| ApiError::unauthorized("未登录"))
+}
+
+pub(crate) async fn require_user(session: &Session) -> Result<i64, ApiError> {
+    session
+        .get::<i64>(USER_ID_KEY)
+        .await
+        .map_err(|error| {
+            tracing::error!(error = %error, "读取 session 失败");
+            ApiError::internal("认证状态读取失败")
+        })?
+        .ok_or_else(|| ApiError::unauthorized("未登录"))
 }
 
 /// 首次启动（用户表为空）时创建初始管理员：
