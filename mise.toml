@@ -1,0 +1,25 @@
+[tools]
+watchexec = "2"
+
+[tasks."dev:frontend"]
+description = "启动 Vite 开发服务"
+dir = "web"
+run = "pnpm dev"
+
+[tasks."dev:backend"]
+description = "启动 Rust 后端"
+run = "cargo run -p server"
+sources = [
+  "Cargo.toml",
+  "Cargo.lock",
+  "crates/**/*.rs",
+  "crates/**/migrations/**/*.sql",
+]
+
+[tasks."dev:backend-watch"]
+description = "监听 Rust 改动并重启后端"
+run = "mise watch dev:backend --restart"
+
+[tasks.dev]
+description = "启动前后端开发服务"
+depends = ["dev:frontend", "dev:backend-watch"]

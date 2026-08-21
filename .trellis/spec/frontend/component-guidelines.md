@@ -5,7 +5,7 @@
 ## 概览
 
 - 使用 React 函数组件 + TypeScript。
-- 基础组件复用 **shadcn/ui**（位于 `components/ui/`），但**不直接套默认 shadcn 样式**，保持 Dockrs 自己的视觉语言（见 `AGENTS.md` UI Guidelines）。
+- 基础组件复用 **shadcn/ui**（位于 `components/ui/`），但**不直接套默认 shadcn 样式**，保持 Dockrs 自己的视觉语言（见 `AGENTS.md` UI Guidelines 与 [设计系统](./design-system.md)）。
 - 图标使用 `lucide-react`。
 
 ## 组件结构

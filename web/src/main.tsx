@@ -6,6 +6,7 @@ import App from "./App.tsx";
 
 const queryClient = new QueryClient();
 
+// biome-ignore lint/style/noNonNullAssertion: Vite's index.html always provides #root
 createRoot(document.getElementById("root")!).render(
 	<StrictMode>
 		<QueryClientProvider client={queryClient}>

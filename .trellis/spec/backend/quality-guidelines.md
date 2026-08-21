@@ -5,11 +5,19 @@
 ## 概览
 
 - 语言遵循 `AGENTS.md` 代码风格：保持实现简单、避免过早抽象、不为未来假设增加复杂度、优先清晰的类型和错误处理、不使用 `unwrap()` 处理可预期错误、新功能优先复用现有模块。
-- 质量门禁命令（提交前必须通过）：
+
+## 修改后验证
+
+修改 `crates/` 下的后端 Rust 代码后，在仓库根目录依次执行：
 
 ```bash
-cargo fmt
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features
+```
+
+提交前或涉及行为变更时，再执行完整测试：
+
+```bash
 cargo test --workspace
 ```
 

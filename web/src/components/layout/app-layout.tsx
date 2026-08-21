@@ -8,11 +8,11 @@ import {
 	LayoutGrid,
 	Network,
 	ScrollText,
-	Settings,
 	ShieldCheck,
 	Terminal,
 } from "lucide-react";
 import { NavLink, Outlet } from "react-router-dom";
+import { UserMenu } from "@/features/auth/user-menu";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
@@ -132,26 +132,7 @@ export function AppLayout() {
 
 				{/* 底部用户区 */}
 				<div className="border-sidebar-border border-t p-3">
-					<div className="flex items-center justify-between rounded-lg p-2 transition-colors hover:bg-sidebar-accent">
-						<div className="flex min-w-0 items-center gap-2.5">
-							<span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-foreground font-medium text-background text-xs">
-								A
-							</span>
-							<div className="min-w-0">
-								<div className="truncate font-semibold text-xs">Admin</div>
-								<div className="truncate font-mono text-[11px] text-muted-foreground">
-									本地模式
-								</div>
-							</div>
-						</div>
-						<span
-							className="cursor-not-allowed p-1 text-muted-foreground/50"
-							aria-disabled="true"
-							title="设置即将上线"
-						>
-							<Settings className="size-4" />
-						</span>
-					</div>
+					<UserMenu />
 				</div>
 			</aside>
 

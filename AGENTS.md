@@ -187,16 +187,21 @@ Zustand 只保存 UI / 客户端状态，不要复制服务端数据。
 Rust：
 
 ```bash
-cargo fmt
+# 修改后端 Rust 代码后，在仓库根目录执行
+cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features
+
+# 提交前或涉及行为变更时执行
 cargo test --workspace
 ```
 
 Frontend：
 
 ```bash
-# 在 web/ 目录
+# 修改前端代码后，在 web/ 目录执行
 pnpm check   # = biome check .（Biome 及其配置在 web/）
+
+# 提交前或涉及构建配置、类型与打包行为变更时执行
 pnpm build
 ```
 
@@ -213,6 +218,8 @@ pnpm build
 
 修改完成前至少确认：
 
+- 修改后端 Rust 代码后，`cargo fmt --all -- --check` 和 `cargo clippy --workspace --all-targets --all-features` 通过
+- 修改前端代码后，在 `web/` 执行的 `pnpm check` 通过
 - Rust 可以编译
 - 前端可以构建
 - 没有破坏现有 API

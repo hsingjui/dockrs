@@ -11,4 +11,13 @@ export default defineConfig({
       '@': path.resolve(import.meta.dirname, './src'),
     },
   },
+  server: {
+    // dev 下将 /api 代理到 Dockrs 后端，前端同源请求，无需处理跨域与 cookie
+    proxy: {
+      '/api': {
+        target: process.env.DOCKRS_BACKEND_URL ?? 'http://127.0.0.1:8080',
+        changeOrigin: true,
+      },
+    },
+  },
 })
