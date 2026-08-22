@@ -1,8 +1,14 @@
+mod agent;
 mod auth;
 mod environments;
 mod error;
+mod resources;
 
-use std::{collections::HashMap, net::SocketAddr, sync::Arc};
+use std::{
+    collections::HashMap,
+    net::SocketAddr,
+    sync::{Arc, atomic::AtomicU64},
+};
 
 use dockrs_docker::DockerSnapshotCollector;
 use sqlx::sqlite::SqlitePool;
@@ -18,8 +24,9 @@ pub(crate) struct AppState {
     pub(crate) local_docker: Option<DockerSnapshotCollector>,
     pub(crate) agent_token: Option<String>,
     pub(crate) agent_snapshots: Arc<RwLock<HashMap<String, environments::CachedAgentSnapshot>>>,
+    pub(crate) agent_connections: Arc<RwLock<HashMap<String, agent::AgentConnection>>>,
+    pub(crate) next_agent_sequence: Arc<AtomicU64>,
 }
-
 #[derive(OpenApi)]
 #[openapi(
     paths(
@@ -28,10 +35,26 @@ pub(crate) struct AppState {
         auth::change_password,
         auth::me,
         environments::list_environments,
+        environments::get_environment,
         environments::update_environment_name,
-        environments::register_agent,
-        environments::agent_heartbeat,
-        environments::agent_snapshot
+        environments::agent_registry::register_agent,
+        environments::agent_registry::agent_heartbeat,
+        environments::agent_registry::agent_snapshot,
+        resources::overview::environment_overview,
+        resources::containers::list_containers,
+        resources::containers::container_action,
+        resources::containers::remove_container,
+        resources::images::list_images,
+        resources::images::pull_image,
+        resources::images::remove_image,
+        resources::volumes::list_volumes,
+        resources::volumes::create_volume,
+        resources::volumes::remove_volume,
+        resources::networks::list_networks,
+        resources::networks::create_network,
+        resources::networks::remove_network,
+        resources::stacks::list_stacks,
+        resources::stacks::get_stack
     ),
     components(schemas(
         auth::LoginRequest,
@@ -46,14 +69,50 @@ pub(crate) struct AppState {
         environments::ContainerCountsResponse,
         environments::MemoryMetricsResponse,
         environments::EnvironmentKind,
-        environments::EnvironmentStatus
+        environments::EnvironmentStatus,
+        resources::EnvironmentOverviewResponse,
+        resources::OverviewResources,
+        resources::ResourceCountResponse,
+        resources::ContainerCountOverview,
+        resources::ContainerResponse,
+        resources::ContainerPortResponse,
+        resources::ImageResponse,
+        resources::VolumeResponse,
+        resources::NetworkResponse,
+        resources::StackListResponse,
+        resources::StackResponse,
+        resources::StackServiceResponse,
+        resources::StackTaskResponse,
+        resources::MutationResponse,
+        resources::PullImageRequest,
+        resources::CreateVolumeRequest,
+        resources::CreateNetworkRequest,
+        error::ApiErrorData,
+        error::ApiErrorResponse
     ))
 )]
 struct ApiDoc;
 
+#[derive(Clone, Copy, Default)]
+struct LocalTimer;
+
+impl tracing_subscriber::fmt::time::FormatTime for LocalTimer {
+    fn format_time(&self, w: &mut tracing_subscriber::fmt::format::Writer<'_>) -> std::fmt::Result {
+        use time::macros::format_description;
+
+        // 本地时间，不含时区和微秒：2026-08-21 13:15:31
+        const FMT: &[time::format_description::FormatItem<'_>] =
+            format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+        let now =
+            time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+        write!(w, "{}", now.format(FMT).unwrap_or_default())
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
+        .with_timer(LocalTimer)
         .with_env_filter(
             tracing_subscriber::EnvFilter::builder()
                 .with_default_directive(tracing_subscriber::filter::LevelFilter::INFO.into())
@@ -104,10 +163,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         local_docker,
         agent_token: std::env::var("DOCKRS_AGENT_TOKEN").ok(),
         agent_snapshots: Arc::new(RwLock::new(HashMap::new())),
+        agent_connections: Arc::new(RwLock::new(HashMap::new())),
+        next_agent_sequence: Arc::new(AtomicU64::new(1)),
     };
 
     let app = axum::Router::new()
-        .nest("/api", auth::router().merge(environments::router()))
+        .nest(
+            "/api",
+            auth::router()
+                .merge(environments::router())
+                .merge(agent::router())
+                .merge(resources::router()),
+        )
         .route("/api/openapi.json", axum::routing::get(openapi))
         .method_not_allowed_fallback(error::method_not_allowed)
         .fallback(error::not_found)

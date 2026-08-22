@@ -1,83 +1,33 @@
 import {
-	Activity,
 	Box,
 	Container,
-	FileCode2,
 	HardDrive,
+	Home,
 	Layers,
-	LayoutGrid,
+	LayoutDashboard,
 	Network,
-	ScrollText,
-	ShieldCheck,
-	Terminal,
+	Server,
 } from "lucide-react";
-import { NavLink, Outlet } from "react-router-dom";
+import { NavLink, Outlet, useMatch } from "react-router-dom";
 import { UserMenu } from "@/features/auth/user-menu";
+import { useEnvironments } from "@/features/environments/use-environments";
 import { cn } from "@/lib/utils";
 
 interface NavItem {
 	label: string;
 	icon: React.ComponentType<{ className?: string }>;
-	/** 已实现页面的路由；未实现页面为 null（禁用态） */
-	to: string | null;
+	to: string;
+	end?: boolean;
 }
-
-interface NavGroup {
-	label: string;
-	items: NavItem[];
-}
-
-const navGroups: NavGroup[] = [
-	{
-		label: "总览",
-		items: [
-			{ label: "环境列表", icon: LayoutGrid, to: "/" },
-			{ label: "全局监控", icon: Activity, to: null },
-		],
-	},
-	{
-		label: "资源管理",
-		items: [
-			{ label: "容器", icon: Box, to: null },
-			{ label: "镜像", icon: Layers, to: null },
-			{ label: "Compose 编排", icon: FileCode2, to: null },
-			{ label: "网络", icon: Network, to: null },
-			{ label: "存储卷", icon: HardDrive, to: null },
-		],
-	},
-	{
-		label: "运维与工具",
-		items: [
-			{ label: "Web 终端", icon: Terminal, to: null },
-			{ label: "实时日志流", icon: ScrollText, to: null },
-			{ label: "Agent 节点配对", icon: ShieldCheck, to: null },
-		],
-	},
-];
 
 const itemClassName =
 	"flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-sm transition-colors";
 
 function NavEntry({ item }: { item: NavItem }) {
-	if (!item.to) {
-		return (
-			<span
-				className={cn(
-					itemClassName,
-					"cursor-not-allowed text-muted-foreground/50",
-				)}
-				aria-disabled="true"
-				title="即将上线"
-			>
-				<item.icon className="size-4" />
-				{item.label}
-			</span>
-		);
-	}
 	return (
 		<NavLink
 			to={item.to}
-			end={item.to === "/"}
+			end={item.end}
 			className={({ isActive }) =>
 				cn(
 					itemClassName,
@@ -94,9 +44,39 @@ function NavEntry({ item }: { item: NavItem }) {
 }
 
 export function AppLayout() {
+	const environmentMatch = useMatch("/environments/:environmentId/*");
+	const environmentId = environmentMatch?.params.environmentId;
+	const environmentsQuery = useEnvironments();
+
+	// 未进入环境时默认选中本地环境，菜单始终展示
+	const environment = environmentId
+		? environmentsQuery.data?.find((item) => item.id === environmentId)
+		: (environmentsQuery.data?.find((item) => item.kind === "local") ??
+			environmentsQuery.data?.[0]);
+	const activeId = environment?.id;
+
+	const envPath = (resource: string) =>
+		`/environments/${encodeURIComponent(activeId as string)}/${resource}`;
+
+	const envItems: NavItem[] = activeId
+		? [
+				{
+					label: "仪表盘",
+					icon: LayoutDashboard,
+					to: `/environments/${encodeURIComponent(activeId)}`,
+					end: true,
+				},
+				{ label: "容器", icon: Box, to: envPath("containers") },
+				{ label: "镜像", icon: Layers, to: envPath("images") },
+				{ label: "堆栈", icon: Layers, to: envPath("stacks") },
+				{ label: "网络", icon: Network, to: envPath("networks") },
+				{ label: "存储卷", icon: HardDrive, to: envPath("volumes") },
+			]
+		: [];
+
 	return (
 		<div className="flex h-dvh">
-			<aside className="flex w-60 shrink-0 flex-col border-sidebar-border border-r bg-sidebar">
+			<aside className="flex w-52 shrink-0 flex-col border-sidebar-border border-r bg-sidebar">
 				{/* 品牌区 */}
 				<div className="flex h-16 items-center border-sidebar-border/80 border-b px-5">
 					<div className="flex items-center gap-2.5">
@@ -113,21 +93,49 @@ export function AppLayout() {
 				</div>
 
 				{/* 导航 */}
-				<nav className="flex-1 space-y-6 overflow-y-auto px-3 py-4">
-					{navGroups.map((group) => (
-						<div key={group.label}>
-							<div className="px-2.5 pb-1.5 font-semibold text-[11px] text-muted-foreground/70 uppercase tracking-wider">
-								{group.label}
+				<nav className="flex-1 overflow-y-auto px-3 py-4">
+					<ul className="flex flex-col gap-0.5">
+						<li>
+							<NavEntry
+								item={{
+									label: "首页",
+									icon: Home,
+									to: "/",
+									end: true,
+								}}
+							/>
+						</li>
+					</ul>
+
+					{environment && (
+						<div className="mt-2">
+							<div className="flex items-center gap-1.5 px-2.5 pb-1.5 text-muted-foreground">
+								{environment.kind === "local" ? (
+									<HardDrive className="size-3 shrink-0" aria-hidden="true" />
+								) : (
+									<Server className="size-3 shrink-0" aria-hidden="true" />
+								)}
+								<span className="min-w-0 flex-1 truncate text-xs">
+									{environment.name}
+								</span>
+								<span
+									className={
+										environment.status === "online"
+											? "size-1.5 shrink-0 rounded-full bg-emerald-500"
+											: "size-1.5 shrink-0 rounded-full bg-rose-500"
+									}
+									aria-hidden="true"
+								/>
 							</div>
 							<ul className="flex flex-col gap-0.5">
-								{group.items.map((item) => (
+								{envItems.map((item) => (
 									<li key={item.label}>
 										<NavEntry item={item} />
 									</li>
 								))}
 							</ul>
 						</div>
-					))}
+					)}
 				</nav>
 
 				{/* 底部用户区 */}

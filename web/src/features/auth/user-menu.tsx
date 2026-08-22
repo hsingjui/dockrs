@@ -2,6 +2,8 @@ import { LoaderCircle, LogOut, Settings } from "lucide-react";
 import { NavLink, useNavigate } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useCurrentUser, useLogout } from "@/features/auth/use-auth";
 
 /** 侧边栏底部用户区：展示当前用户并支持账号设置与退出登录 */
@@ -29,37 +31,43 @@ export function UserMenu() {
 					</div>
 				</div>
 			</div>
-			<div className="flex shrink-0 items-center gap-1.5 border-sidebar-border border-l pl-2">
-				<Button
-					asChild
-					variant="ghost"
-					size="icon-sm"
-					className="text-muted-foreground"
-				>
-					<NavLink to="/settings" aria-label="账号设置" title="账号设置">
-						<Settings aria-hidden="true" />
-					</NavLink>
-				</Button>
-				<Button
-					type="button"
-					variant="ghost"
-					size="icon-sm"
-					className="text-muted-foreground"
-					aria-label="退出登录"
-					title="退出登录"
-					disabled={logoutMutation.isPending}
-					onClick={() =>
-						logoutMutation.mutate(undefined, {
-							onSuccess: () => navigate("/login", { replace: true }),
-						})
-					}
-				>
-					{logoutMutation.isPending ? (
-						<LoaderCircle className="animate-spin" aria-hidden="true" />
-					) : (
-						<LogOut aria-hidden="true" />
-					)}
-				</Button>
+			<div className="flex shrink-0 items-center gap-1.5">
+				<Tooltip content="账号设置">
+					<Button
+						asChild
+						variant="ghost"
+						size="icon-sm"
+						className="text-muted-foreground"
+					>
+						<NavLink to="/settings" aria-label="账号设置">
+							<Settings aria-hidden="true" />
+						</NavLink>
+					</Button>
+				</Tooltip>
+				<Tooltip content="退出登录">
+					<Button
+						type="button"
+						variant="ghost"
+						size="icon-sm"
+						className="text-muted-foreground"
+						aria-label="退出登录"
+						disabled={logoutMutation.isPending}
+						onClick={() =>
+							logoutMutation.mutate(undefined, {
+								onSuccess: () => {
+									toast.info("已退出登录");
+									navigate("/login", { replace: true });
+								},
+							})
+						}
+					>
+						{logoutMutation.isPending ? (
+							<LoaderCircle className="animate-spin" aria-hidden="true" />
+						) : (
+							<LogOut aria-hidden="true" />
+						)}
+					</Button>
+				</Tooltip>
 			</div>
 		</div>
 	);

@@ -4,4 +4,5 @@ resolver = "3"
 members = [
     "crates/server",
     "crates/docker",
+    "crates/agent",
 ]

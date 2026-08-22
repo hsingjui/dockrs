@@ -43,8 +43,56 @@ export function renameEnvironment(
 	id: string,
 	request: RenameEnvironmentRequest,
 ): Promise<EnvironmentNameResponse> {
-	return apiFetch<EnvironmentNameResponse>(`/api/environments/${id}`, {
-		method: "PATCH",
-		body: JSON.stringify(request),
+	return apiFetch<EnvironmentNameResponse>(
+		`/api/environments/${encodeURIComponent(id)}`,
+		{
+			method: "PATCH",
+			body: JSON.stringify(request),
+		},
+	);
+}
+
+export function deleteEnvironment(id: string): Promise<void> {
+	return apiFetch<void>(`/api/environments/${encodeURIComponent(id)}`, {
+		method: "DELETE",
 	});
+}
+
+export interface ResourceCountOverview {
+	total: number | null;
+	active: number | null;
+	error: string | null;
+}
+
+export interface ContainerCountOverview {
+	total: number | null;
+	running: number | null;
+	paused: number | null;
+	stopped: number | null;
+	error: string | null;
+}
+
+export interface EnvironmentOverview {
+	environment: EnvironmentSummary;
+	resources: {
+		stacks: ResourceCountOverview;
+		containers: ContainerCountOverview;
+		images: ResourceCountOverview;
+		volumes: ResourceCountOverview;
+		networks: ResourceCountOverview;
+	};
+}
+
+export function fetchEnvironment(id: string): Promise<EnvironmentSummary> {
+	return apiFetch<EnvironmentSummary>(
+		`/api/environments/${encodeURIComponent(id)}`,
+	);
+}
+
+export function fetchEnvironmentOverview(
+	id: string,
+): Promise<EnvironmentOverview> {
+	return apiFetch<EnvironmentOverview>(
+		`/api/environments/${encodeURIComponent(id)}/overview`,
+	);
 }

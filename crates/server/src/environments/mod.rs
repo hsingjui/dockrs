@@ -6,8 +6,7 @@ use std::{
 use axum::{
     Router,
     extract::{Path, State},
-    http::HeaderMap,
-    routing::{get, patch, post},
+    routing::{get, post},
 };
 use dockrs_docker::{
     ContainerCounts as DockerContainerCounts, DockerSnapshot, MemoryMetrics as DockerMemoryMetrics,
@@ -18,6 +17,13 @@ use tokio::time::timeout;
 use tower_sessions::Session;
 use utoipa::ToSchema;
 
+pub(crate) mod agent_registry;
+
+pub(crate) use agent_registry::{
+    agent_heartbeat, agent_snapshot, register_agent, register_connected_agent, require_agent_token,
+    store_agent_snapshot, touch_agent,
+};
+
 use crate::{
     AppState,
     auth::require_user,
@@ -27,7 +33,6 @@ use crate::{
 const AGENT_ONLINE_WINDOW_SECS: i64 = 90;
 const AGENT_SNAPSHOT_TTL: Duration = Duration::from_secs(30);
 const DOCKER_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
-const MAX_AGENT_SNAPSHOTS: usize = 64;
 
 #[derive(Clone)]
 pub(crate) struct CachedAgentSnapshot {
@@ -155,7 +160,12 @@ impl From<AgentSnapshotRequest> for DockerSnapshot {
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/environments", get(list_environments))
-        .route("/environments/{id}", patch(update_environment_name))
+        .route(
+            "/environments/{id}",
+            get(get_environment)
+                .patch(update_environment_name)
+                .delete(delete_environment),
+        )
         .route("/environments/agents/register", post(register_agent))
         .route("/environments/agents/{id}/heartbeat", post(agent_heartbeat))
         .route("/environments/agents/{id}/snapshot", post(agent_snapshot))
@@ -207,6 +217,74 @@ pub async fn list_environments(
         ApiError::internal("获取环境列表失败，请稍后重试")
     })?;
 
+    let (local_snapshot, agent_snapshots) = runtime_snapshots(&state).await;
+
+    let mut environments = Vec::with_capacity(rows.len());
+    for row in rows {
+        environments.push(response_for_row(
+            &row,
+            local_snapshot.as_ref(),
+            &agent_snapshots,
+        )?);
+    }
+
+    Ok(ApiResponse::success(environments))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/environments/{id}",
+    params(("id" = String, Path, description = "环境 ID")),
+    responses(
+        (status = 200, body = EnvironmentResponse, description = "环境详情"),
+        (status = 401, description = "未登录"),
+        (status = 404, description = "环境不存在")
+    )
+)]
+pub(crate) async fn get_environment(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    session: Session,
+) -> Result<ApiResponse<EnvironmentResponse>, ApiError> {
+    require_user(&session).await?;
+    Ok(ApiResponse::success(
+        environment_response_by_id(&state, &id).await?,
+    ))
+}
+
+pub(crate) async fn environment_response_by_id(
+    state: &AppState,
+    id: &str,
+) -> Result<EnvironmentResponse, ApiError> {
+    let row = sqlx::query_as::<_, EnvironmentRow>(
+        "SELECT id, name, kind, endpoint, last_seen_at,
+                CASE
+                    WHEN kind = 'agent'
+                        AND last_seen_at IS NOT NULL
+                        AND datetime(last_seen_at) >= datetime('now', ?)
+                    THEN 1
+                    ELSE 0
+                END AS is_online
+         FROM environments
+         WHERE id = ?",
+    )
+    .bind(format!("-{AGENT_ONLINE_WINDOW_SECS} seconds"))
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|error| {
+        tracing::error!(environment_id = %id, error = %error, "查询环境详情失败");
+        ApiError::internal("获取环境详情失败，请稍后重试")
+    })?
+    .ok_or_else(|| ApiError::not_found("环境不存在"))?;
+
+    let (local_snapshot, agent_snapshots) = runtime_snapshots(state).await;
+    response_for_row(&row, local_snapshot.as_ref(), &agent_snapshots)
+}
+
+async fn runtime_snapshots(
+    state: &AppState,
+) -> (Option<DockerSnapshot>, HashMap<String, CachedAgentSnapshot>) {
     let local_snapshot = match state.local_docker.as_ref() {
         Some(collector) => match timeout(DOCKER_REQUEST_TIMEOUT, collector.snapshot()).await {
             Ok(Ok(snapshot)) => Some(snapshot),
@@ -228,48 +306,51 @@ pub async fn list_environments(
         snapshots.clone()
     };
 
-    let mut environments = Vec::with_capacity(rows.len());
-    for row in rows {
-        let kind = parse_kind(&row.kind).ok_or_else(|| {
-            tracing::error!(environment_id = %row.id, kind = %row.kind, "环境类型无效");
-            ApiError::internal("环境数据无效")
-        })?;
+    (local_snapshot, agent_snapshots)
+}
 
-        let response = match kind {
-            EnvironmentKind::Local => match local_snapshot.as_ref() {
-                Some(snapshot) => {
-                    response_from_snapshot(&row, EnvironmentStatus::Online, snapshot, None)
-                }
-                None => unavailable_response(
-                    &row,
-                    EnvironmentStatus::Offline,
-                    "无法连接 Docker Engine，请检查 Docker Socket",
-                ),
-            },
-            EnvironmentKind::Agent => {
-                if row.is_online == 0 {
-                    unavailable_response(
-                        &row,
-                        EnvironmentStatus::Offline,
-                        "Agent 心跳超时，节点当前离线",
-                    )
-                } else if let Some(cached) = agent_snapshots.get(&row.id) {
-                    response_from_snapshot(&row, EnvironmentStatus::Online, &cached.snapshot, None)
-                } else {
-                    let mut response = unavailable_response(
-                        &row,
-                        EnvironmentStatus::Online,
-                        "等待 Agent 上报 Docker 指标",
-                    );
-                    response.offline_reason = None;
-                    response
-                }
+fn response_for_row(
+    row: &EnvironmentRow,
+    local_snapshot: Option<&DockerSnapshot>,
+    agent_snapshots: &HashMap<String, CachedAgentSnapshot>,
+) -> Result<EnvironmentResponse, ApiError> {
+    let kind = parse_kind(&row.kind).ok_or_else(|| {
+        tracing::error!(environment_id = %row.id, kind = %row.kind, "环境类型无效");
+        ApiError::internal("环境数据无效")
+    })?;
+
+    let response = match kind {
+        EnvironmentKind::Local => match local_snapshot {
+            Some(snapshot) => {
+                response_from_snapshot(row, EnvironmentStatus::Online, snapshot, None)
             }
-        };
-        environments.push(response);
-    }
-
-    Ok(ApiResponse::success(environments))
+            None => unavailable_response(
+                row,
+                EnvironmentStatus::Offline,
+                "无法连接 Docker Engine，请检查 Docker Socket",
+            ),
+        },
+        EnvironmentKind::Agent => {
+            if row.is_online == 0 {
+                unavailable_response(
+                    row,
+                    EnvironmentStatus::Offline,
+                    "Agent 心跳超时，节点当前离线",
+                )
+            } else if let Some(cached) = agent_snapshots.get(&row.id) {
+                response_from_snapshot(row, EnvironmentStatus::Online, &cached.snapshot, None)
+            } else {
+                let mut response = unavailable_response(
+                    row,
+                    EnvironmentStatus::Online,
+                    "等待 Agent 上报 Docker 指标",
+                );
+                response.offline_reason = None;
+                response
+            }
+        }
+    };
+    Ok(response)
 }
 
 #[utoipa::path(
@@ -317,152 +398,42 @@ pub async fn update_environment_name(
 }
 
 #[utoipa::path(
-    post,
-    path = "/api/environments/agents/register",
-    request_body = AgentRegistrationRequest,
-    responses((status = 200, body = AgentRegistrationResponse, description = "Agent 注册成功"))
+    delete,
+    path = "/api/environments/{id}",
+    params(("id" = String, Path, description = "环境 ID")),
+    responses(
+        (status = 200, description = "删除成功"),
+        (status = 400, description = "本地环境不支持删除"),
+        (status = 401, description = "未登录"),
+        (status = 404, description = "环境不存在")
+    )
 )]
-async fn register_agent(
+pub async fn delete_environment(
     State(state): State<AppState>,
-    headers: HeaderMap,
-    ApiJson(request): ApiJson<AgentRegistrationRequest>,
-) -> Result<ApiResponse<AgentRegistrationResponse>, ApiError> {
-    require_agent_token(&headers, &state)?;
-
-    let id = validate_agent_id(request.id)?;
+    Path(id): Path<String>,
+    session: Session,
+) -> Result<ApiResponse<()>, ApiError> {
+    require_user(&session).await?;
     if id == "local" {
-        return Err(ApiError::bad_request("Agent ID 无效"));
-    }
-    let name = validate_name(request.name)?;
-    let endpoint = request.endpoint.trim().to_owned();
-    if endpoint.is_empty() || endpoint.chars().count() > 256 {
-        return Err(ApiError::bad_request("Agent 地址无效"));
+        return Err(ApiError::bad_request("本地环境不支持删除"));
     }
 
-    let existing_kind =
-        sqlx::query_scalar::<_, String>("SELECT kind FROM environments WHERE id = ?")
-            .bind(&id)
-            .fetch_optional(&state.pool)
-            .await
-            .map_err(|error| {
-                tracing::error!(error = %error, "查询 Agent 环境失败");
-                ApiError::internal("Agent 注册失败，请稍后重试")
-            })?;
-    if existing_kind.as_deref() == Some("local") {
-        return Err(ApiError::bad_request("环境 ID 已被本地环境占用"));
-    }
+    let result = sqlx::query("DELETE FROM environments WHERE id = ? AND kind = 'agent'")
+        .bind(&id)
+        .execute(&state.pool)
+        .await
+        .map_err(|error| {
+            tracing::error!(environment_id = %id, error = %error, "删除环境失败");
+            ApiError::internal("删除环境失败，请稍后重试")
+        })?;
 
-    let agent_id = request
-        .agent_id
-        .filter(|agent_id| !agent_id.trim().is_empty())
-        .unwrap_or_else(|| id.clone());
-    sqlx::query(
-        "INSERT INTO environments (id, name, kind, endpoint, agent_id, last_seen_at)
-         VALUES (?, ?, 'agent', ?, ?, datetime('now'))
-         ON CONFLICT(id) DO UPDATE SET
-             name = excluded.name,
-             endpoint = excluded.endpoint,
-             agent_id = excluded.agent_id,
-             last_seen_at = datetime('now'),
-             updated_at = datetime('now')",
-    )
-    .bind(&id)
-    .bind(&name)
-    .bind(endpoint)
-    .bind(agent_id)
-    .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "写入 Agent 环境失败");
-        ApiError::internal("Agent 注册失败，请稍后重试")
-    })?;
-
-    Ok(ApiResponse::success(AgentRegistrationResponse { id }))
-}
-
-#[utoipa::path(
-    post,
-    path = "/api/environments/agents/{id}/heartbeat",
-    params(("id" = String, Path, description = "Agent 环境 ID")),
-    responses(
-        (status = 200, description = "心跳已记录"),
-        (status = 401, description = "Agent 凭据无效"),
-        (status = 404, description = "Agent 环境不存在")
-    )
-)]
-async fn agent_heartbeat(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-) -> Result<ApiResponse<serde_json::Value>, ApiError> {
-    require_agent_token(&headers, &state)?;
-
-    let result = sqlx::query(
-        "UPDATE environments
-         SET last_seen_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND kind = 'agent'",
-    )
-    .bind(&id)
-    .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "更新 Agent 心跳失败");
-        ApiError::internal("更新 Agent 心跳失败，请稍后重试")
-    })?;
     if result.rows_affected() == 0 {
-        return Err(ApiError::not_found("Agent 环境不存在"));
+        return Err(ApiError::not_found("环境不存在"));
     }
 
-    Ok(ApiResponse::success(serde_json::json!({})))
-}
+    state.agent_snapshots.write().await.remove(&id);
 
-#[utoipa::path(
-    post,
-    path = "/api/environments/agents/{id}/snapshot",
-    params(("id" = String, Path, description = "Agent 环境 ID")),
-    request_body = AgentSnapshotRequest,
-    responses(
-        (status = 200, description = "指标已接收"),
-        (status = 400, description = "指标格式错误"),
-        (status = 401, description = "Agent 凭据无效"),
-        (status = 404, description = "Agent 环境不存在")
-    )
-)]
-async fn agent_snapshot(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-    headers: HeaderMap,
-    ApiJson(request): ApiJson<AgentSnapshotRequest>,
-) -> Result<ApiResponse<serde_json::Value>, ApiError> {
-    require_agent_token(&headers, &state)?;
-
-    let result = sqlx::query(
-        "UPDATE environments
-         SET last_seen_at = datetime('now'), updated_at = datetime('now')
-         WHERE id = ? AND kind = 'agent'",
-    )
-    .bind(&id)
-    .execute(&state.pool)
-    .await
-    .map_err(|error| {
-        tracing::error!(error = %error, "更新 Agent 指标时间失败");
-        ApiError::internal("接收 Agent 指标失败，请稍后重试")
-    })?;
-    if result.rows_affected() == 0 {
-        return Err(ApiError::not_found("Agent 环境不存在"));
-    }
-
-    let mut snapshots = state.agent_snapshots.write().await;
-    snapshots.insert(
-        id,
-        CachedAgentSnapshot {
-            snapshot: request.into(),
-            received_at: Instant::now(),
-        },
-    );
-    trim_agent_snapshots(&mut snapshots);
-
-    Ok(ApiResponse::success(serde_json::json!({})))
+    Ok(ApiResponse::success(()))
 }
 
 fn response_from_snapshot(
@@ -545,48 +516,108 @@ fn validate_name(name: String) -> Result<String, ApiError> {
     if name.is_empty() {
         return Err(ApiError::bad_request("环境名称不能为空"));
     }
-    if name.chars().count() > 64 {
-        return Err(ApiError::bad_request("环境名称不能超过 64 个字符"));
+    if name.chars().count() > 64 || name.chars().any(char::is_control) {
+        return Err(ApiError::bad_request("环境名称无效"));
     }
     Ok(name)
 }
 
-fn validate_agent_id(id: String) -> Result<String, ApiError> {
-    let id = id.trim().to_owned();
-    if id.is_empty() || id.chars().count() > 128 {
-        return Err(ApiError::bad_request("Agent ID 无效"));
-    }
-    Ok(id)
-}
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
 
-fn require_agent_token(headers: &HeaderMap, state: &AppState) -> Result<(), ApiError> {
-    let Some(expected) = state.agent_token.as_deref() else {
-        return Err(ApiError::unauthorized("Agent 通信尚未配置"));
+    use super::{
+        AgentSnapshotRequest, ContainerCountsResponse, DockerSnapshot, EnvironmentKind,
+        EnvironmentRow, EnvironmentStatus, MemoryMetricsResponse, parse_kind, response_for_row,
+        validate_name,
     };
-    let provided = headers
-        .get("x-dockrs-agent-token")
-        .and_then(|value| value.to_str().ok())
-        .or_else(|| {
-            headers
-                .get("authorization")
-                .and_then(|value| value.to_str().ok())
-                .and_then(|value| value.strip_prefix("Bearer "))
-        });
-    if provided != Some(expected) {
-        return Err(ApiError::unauthorized("Agent 凭据无效"));
-    }
-    Ok(())
-}
 
-fn trim_agent_snapshots(snapshots: &mut HashMap<String, CachedAgentSnapshot>) {
-    while snapshots.len() > MAX_AGENT_SNAPSHOTS {
-        let oldest_id = snapshots
-            .iter()
-            .min_by_key(|(_, snapshot)| snapshot.received_at)
-            .map(|(id, _)| id.clone());
-        let Some(oldest_id) = oldest_id else {
-            break;
+    #[test]
+    fn environment_kind_parser_accepts_only_known_values() {
+        assert!(matches!(parse_kind("local"), Some(EnvironmentKind::Local)));
+        assert!(matches!(parse_kind("agent"), Some(EnvironmentKind::Agent)));
+        assert!(parse_kind("remote").is_none());
+    }
+
+    #[test]
+    fn environment_name_is_trimmed_and_bounded() {
+        assert_eq!(
+            validate_name("  家用 Docker  ".to_owned()).unwrap(),
+            "家用 Docker"
+        );
+        assert!(validate_name("   ".to_owned()).is_err());
+        assert!(validate_name("x".repeat(65)).is_err());
+        assert!(validate_name("bad\nname".to_owned()).is_err());
+    }
+
+    #[test]
+    fn agent_snapshot_maps_to_docker_snapshot() {
+        let snapshot: DockerSnapshot = AgentSnapshotRequest {
+            docker_version: "27.0".to_owned(),
+            containers: ContainerCountsResponse {
+                total: 4,
+                running: 2,
+                paused: 1,
+                stopped: 1,
+            },
+            cpu_percent: Some(12.5),
+            memory: Some(MemoryMetricsResponse {
+                used_bytes: 40,
+                total_bytes: 100,
+                percent: 40.0,
+            }),
+            metrics_error: None,
+            metrics_collected_at: 123,
+        }
+        .into();
+
+        assert_eq!(snapshot.docker_version, "27.0");
+        assert_eq!(snapshot.containers.running, 2);
+        assert_eq!(
+            snapshot.memory.as_ref().map(|memory| memory.used_bytes),
+            Some(40)
+        );
+        assert_eq!(snapshot.cpu_percent, Some(12.5));
+    }
+
+    #[test]
+    fn response_preserves_local_snapshot_metrics() {
+        let row = EnvironmentRow {
+            id: "local".to_owned(),
+            name: "local-engine".to_owned(),
+            kind: "local".to_owned(),
+            endpoint: "unix:///var/run/docker.sock".to_owned(),
+            last_seen_at: None,
+            is_online: 1,
         };
-        snapshots.remove(&oldest_id);
+        let snapshot = DockerSnapshot {
+            docker_version: "27.0".to_owned(),
+            containers: dockrs_docker::ContainerCounts {
+                total: 4,
+                running: 2,
+                paused: 1,
+                stopped: 1,
+            },
+            cpu_percent: Some(12.5),
+            memory: Some(dockrs_docker::MemoryMetrics {
+                used_bytes: 40,
+                total_bytes: 100,
+                percent: 40.0,
+            }),
+            metrics_error: None,
+            metrics_collected_at: 123,
+        };
+
+        let response = response_for_row(&row, Some(&snapshot), &HashMap::new())
+            .expect("有效环境类型应能生成响应");
+
+        assert!(matches!(response.kind, EnvironmentKind::Local));
+        assert!(matches!(response.status, EnvironmentStatus::Online));
+        assert_eq!(response.docker_version.as_deref(), Some("27.0"));
+        assert_eq!(response.containers.running, 2);
+        assert_eq!(
+            response.memory.as_ref().map(|memory| memory.used_bytes),
+            Some(40)
+        );
     }
 }

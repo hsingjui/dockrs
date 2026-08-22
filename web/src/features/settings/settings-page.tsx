@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "@/components/ui/toast";
 import { useChangePassword, useLogout } from "@/features/auth/use-auth";
 
 const changePasswordSchema = z
@@ -58,10 +59,17 @@ export function SettingsPage() {
 			{
 				onSuccess: () => {
 					reset();
+					toast.success("密码已修改，请重新登录");
 					logoutMutation.mutate(undefined, {
 						onSuccess: () => navigate("/login", { replace: true }),
+						onError: () =>
+							toast.error(
+								"密码已修改，但自动退出登录失败，请点击侧栏的退出按钮",
+							),
 					});
 				},
+				onError: (error) =>
+					toast.error(error.message ?? "修改密码失败，请稍后重试"),
 			},
 		);
 	};
@@ -70,7 +78,6 @@ export function SettingsPage() {
 		<div className="mx-auto w-full max-w-5xl space-y-6 px-6 py-8 lg:px-8">
 			<header>
 				<h1 className="font-semibold text-xl">设置</h1>
-				<p className="mt-1 text-muted-foreground text-sm">管理账号与安全设置</p>
 			</header>
 
 			<Card className="max-w-2xl">
@@ -93,35 +100,6 @@ export function SettingsPage() {
 						onSubmit={handleSubmit(onSubmit)}
 						noValidate
 					>
-						{mutation.isError && (
-							<p
-								role="alert"
-								className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
-							>
-								{mutation.error?.message ?? "修改密码失败，请稍后重试"}
-							</p>
-						)}
-
-						{logoutMutation.isError && (
-							<p
-								role="alert"
-								className="rounded-lg bg-amber-500/10 px-3 py-2 text-amber-700 text-sm dark:text-amber-400"
-							>
-								密码已修改，但自动退出登录失败，请点击侧栏的退出按钮
-							</p>
-						)}
-
-						{mutation.isSuccess && !logoutMutation.isError && (
-							<p
-								role="status"
-								className="rounded-lg bg-emerald-500/10 px-3 py-2 text-emerald-700 text-sm dark:text-emerald-400"
-							>
-								{logoutMutation.isPending
-									? "密码已修改，正在退出登录…"
-									: "密码已修改"}
-							</p>
-						)}
-
 						<div className="flex flex-col gap-2">
 							<Label htmlFor="current-password">当前密码</Label>
 							<Input

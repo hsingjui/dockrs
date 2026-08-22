@@ -6,15 +6,10 @@ import { Navigate, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 
 import { Button } from "@/components/ui/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { toast } from "@/components/ui/toast";
 import { useCurrentUser, useLogin } from "@/features/auth/use-auth";
 
 const loginSchema = z.object({
@@ -53,8 +48,12 @@ export function LoginPage() {
 	const onSubmit = (values: LoginFormValues) => {
 		mutation.mutate(values, {
 			onSuccess: () => {
+				toast.success("登录成功");
 				const from = (location.state as { from?: string } | null)?.from;
 				navigate(from ?? "/", { replace: true });
+			},
+			onError: (error) => {
+				toast.error(error.message ?? "登录失败，请稍后重试");
 			},
 		});
 	};
@@ -76,7 +75,6 @@ export function LoginPage() {
 						<Container className="size-6" aria-hidden="true" />
 					</div>
 					<CardTitle className="text-xl">登录 Dockrs</CardTitle>
-					<CardDescription>使用账号密码管理你的 Docker 环境</CardDescription>
 				</CardHeader>
 				<CardContent>
 					<form
@@ -84,15 +82,6 @@ export function LoginPage() {
 						onSubmit={handleSubmit(onSubmit)}
 						noValidate
 					>
-						{mutation.isError && (
-							<p
-								role="alert"
-								className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive"
-							>
-								{mutation.error?.message ?? "登录失败，请稍后重试"}
-							</p>
-						)}
-
 						<div className="flex flex-col gap-2">
 							<Label htmlFor="username">账号</Label>
 							<Input

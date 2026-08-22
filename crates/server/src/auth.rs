@@ -277,3 +277,27 @@ fn generate_password() -> String {
     OsRng.fill_bytes(&mut bytes);
     bytes.iter().map(|b| format!("{b:02x}")).collect()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{generate_password, hash_password, verify_password};
+
+    #[test]
+    fn hashed_password_only_verifies_the_original_password() {
+        let hash = hash_password("correct horse battery staple")
+            .unwrap_or_else(|error| panic!("生成密码哈希失败: {error}"));
+
+        assert!(hash.starts_with("$argon2id$"));
+        assert!(verify_password(&hash, "correct horse battery staple"));
+        assert!(!verify_password(&hash, "wrong password"));
+        assert!(!verify_password("not a password hash", "wrong password"));
+    }
+
+    #[test]
+    fn generated_password_is_a_fixed_length_hex_string() {
+        let password = generate_password();
+
+        assert_eq!(password.len(), 18);
+        assert!(password.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    }
+}

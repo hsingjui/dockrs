@@ -5,7 +5,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use serde::{Serialize, de::DeserializeOwned};
-use serde_json::json;
+use utoipa::ToSchema;
 
 /// 统一 API 成功响应。
 #[derive(Debug, Serialize)]
@@ -29,6 +29,16 @@ impl<T: Serialize> IntoResponse for ApiResponse<T> {
     fn into_response(self) -> Response {
         Json(self).into_response()
     }
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ApiErrorData {}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ApiErrorResponse {
+    pub code: u16,
+    pub data: ApiErrorData,
+    pub msg: String,
 }
 
 /// 统一 API 错误：保留 HTTP status，并返回 `{ code, data, msg }` 结构。
@@ -62,6 +72,18 @@ impl ApiError {
         Self::new(StatusCode::METHOD_NOT_ALLOWED, msg)
     }
 
+    pub fn conflict(msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, msg)
+    }
+
+    pub fn unprocessable_entity(msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNPROCESSABLE_ENTITY, msg)
+    }
+
+    pub fn bad_gateway(msg: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_GATEWAY, msg)
+    }
+
     pub fn internal(msg: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, msg)
     }
@@ -70,9 +92,9 @@ impl ApiError {
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
         let status = self.status;
-        let body = ApiResponse {
+        let body = ApiErrorResponse {
             code: status.as_u16(),
-            data: json!({}),
+            data: ApiErrorData {},
             msg: self.msg,
         };
         (status, Json(body)).into_response()
